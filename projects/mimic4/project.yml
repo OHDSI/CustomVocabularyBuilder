@@ -1,0 +1,54 @@
+project_id: mimic4
+id_start: 2061500000
+id_end: 2063500000
+legacy_dir: legacy/MIMIC/Ontology
+vocabulary: {id: MIMIC4, name: "MIMIC4 Custom Terminology"}
+sheet: "https://docs.google.com/spreadsheets/d/1LgNSwxx7uDjc6hAJb4m6o_6WvVmuBgH5QYzAqeS3aD0/export?format=csv&gid=1932813645"
+classes:
+  bodysite: m4_emar_site
+  d-items: m4_ditem_label
+  d-labitems: m4_lab_itemid
+  hosp.diagnoses_icd: m4_icd_dx_code
+  hosp.prescriptions: m4_rx_drug
+  hosp.procedures_icd: m4_icd_px_code
+  mimic-hcpcs-cd: m4_hcpcs_code
+  mimic-lab-fluid: m4_lab_fluid
+  mimic-medication-formulary-drug-cd: m4_formulary_cd
+  mimic-medication-frequency: m4_rx_frequency
+  mimic-medication-icu: m4_input_itemid
+  mimic-medication-route: m4_rx_route
+  mimic-medication-site: m4_emar_site
+  mimic-microbiology-organism: m4_micro_org
+  mimic-microbiology-test: m4_micro_test
+  mimic-race: m4_adm_race
+  mimic-spec-type-desc: m4_micro_spec
+  mimic-units: m4_units
+  mimic4wdb: mimic4wdb
+  mimiciv_cs_place_of_service: m4_careunit
+  mimiciv_drug_ndc: gcpt_drug_ndc
+  mimiciv_drug_route: m4_rx_route
+  mimiciv_meas_chart: m4_chart_itemid
+  mimiciv_meas_chartevents_value: m4_chart_value
+  mimiciv_meas_lab_loinc: m4_lab_itemid
+  mimiciv_meas_unit: m4_units
+  mimiciv_meas_wf: m4_meas_wf
+  mimiciv_meas_wf_unit: m4_meas_wf_unit
+  mimiciv_micro_antibiotic: m4_micro_ab
+  mimiciv_micro_microtest: m4_micro_test
+  mimiciv_micro_organism: m4_micro_org
+  mimiciv_micro_resistance: mimic4wdb
+  mimiciv_micro_specimen: m4_micro_spec
+  mimiciv_mimic_generated: m4_generated
+  mimiciv_obs_drgcodes: m4_drg_desc
+  mimiciv_obs_insurance: m4_insurance
+  mimiciv_obs_language: m4_language
+  mimiciv_obs_marital: m4_marital_status
+  mimiciv_outputevents: m4_output_itemid
+  mimiciv_per_ethnicity: m4_adm_race
+  mimiciv_proc_datetimeevents: m4_datetime_item
+  mimiciv_proc_itemid: m4_proc_itemid
+  mimiciv_vis_admission_location: m4_adm_location
+  mimiciv_vis_admission_type: m4_adm_type
+  mimiciv_vis_discharge_location: m4_discharge_loc
+  mimiciv_vis_service: m4_curr_service
+force_vocabulary: true

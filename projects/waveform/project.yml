@@ -1,0 +1,5 @@
+project_id: waveform
+id_start: 2081500000
+id_end: 2082500000
+legacy_dir: legacy/WAVEFORM/Ontology
+vocabulary: {id: WAVEFORM, name: "WAVEFORM Custom Terminology"}

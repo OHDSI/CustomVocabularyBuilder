@@ -1,0 +1,4 @@
+source_code,source_concept_id,source_vocabulary_id,source_code_description,target_concept_id,target_vocabulary_id,valid_start_date,valid_end_date,invalid_reason
+WF100001,2081500001,WAVEFORM,Physiological monitoring,4158083,SNOMED,2025-12-05,2099-12-31,
+WF100002,2081500002,WAVEFORM,Diagnostic ECG,2082499974,WAVEFORM,2025-12-05,2099-12-31,
+WF100005,2081500003,WAVEFORM,dB,44777591,UCUM,2025-12-05,2099-12-31,
