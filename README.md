@@ -31,8 +31,7 @@ bin/cvb export <project>                 # writes release/<project>/*.csv
 `.github/workflows/build.yml` runs from **Actions > Build vocabulary > Run workflow**. With `apply` unchecked it only does a dry run (nothing is written) and uploads `review-<project>`: CSVs of new, changed and deprecated concepts and added and removed relationships. After the review, run it again with `apply` checked. That job waits for approval on the `apply` environment, then builds, validates, exports and publishes a release.
 
 One-time setup in the GitHub repo (Settings > Secrets and variables > Actions):
-- **Secrets:** `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`.
-- **Variables:** `CVB_CORE` (the schema that holds the core vocabulary tables). Optional: `CVB_SCHEMA` (defaults to `CVB_CORE`) and `PGSSLMODE` (e.g. `require`).
+- **Secrets:** `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`, `CVB_CORE` (the schema that holds the core vocabulary tables). Optional: `CVB_SCHEMA` (defaults to `CVB_CORE`) and `PGSSLMODE` (e.g. `require`).
 - **Environment:** Settings > Environments > New environment named `apply`, with yourself under Required reviewers.
 - **Workflow permissions:** Settings > Actions > General > Workflow permissions > Read and write.
 - The database host must accept connections from GitHub-hosted runners.

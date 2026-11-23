@@ -18,9 +18,9 @@ env:
   PGDATABASE: ${{ secrets.PGDATABASE }}
   PGUSER: ${{ secrets.PGUSER }}
   PGPASSWORD: ${{ secrets.PGPASSWORD }}
-  PGSSLMODE: ${{ vars.PGSSLMODE }}
-  CVB_CORE: ${{ vars.CVB_CORE }}
-  CVB_SCHEMA: ${{ vars.CVB_SCHEMA }}
+  PGSSLMODE: ${{ secrets.PGSSLMODE }}
+  CVB_CORE: ${{ secrets.CVB_CORE }}
+  CVB_SCHEMA: ${{ secrets.CVB_SCHEMA }}
 
 jobs:
   review:
