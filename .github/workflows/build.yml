@@ -1,0 +1,75 @@
+name: Build vocabulary
+on:
+  workflow_dispatch:
+    inputs:
+      project:
+        description: Project id (folder under projects/)
+        required: true
+        type: choice
+        options: [mimic4, psychiatry]
+      apply:
+        description: Apply the reviewed changes to the database and publish a release
+        type: boolean
+        default: false
+
+env:
+  PGHOST: ${{ secrets.PGHOST }}
+  PGPORT: ${{ secrets.PGPORT }}
+  PGDATABASE: ${{ secrets.PGDATABASE }}
+  PGUSER: ${{ secrets.PGUSER }}
+  PGPASSWORD: ${{ secrets.PGPASSWORD }}
+  PGSSLMODE: ${{ vars.PGSSLMODE }}
+  CVB_CORE: ${{ vars.CVB_CORE }}
+  CVB_SCHEMA: ${{ vars.CVB_SCHEMA }}
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - run: |
+          sudo R CMD javareconf
+          Rscript -e 'install.packages(c("DatabaseConnector", "SqlRender", "yaml"))'
+      - run: bin/cvb init
+      - run: bin/cvb build ${{ inputs.project }} --dry-run
+      - uses: actions/upload-artifact@v4
+        with:
+          name: review-${{ inputs.project }}
+          path: release/${{ inputs.project }}/review/
+
+  apply:
+    needs: review
+    if: inputs.apply
+    runs-on: ubuntu-latest
+    environment: apply
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - run: |
+          sudo R CMD javareconf
+          Rscript -e 'install.packages(c("DatabaseConnector", "SqlRender", "yaml"))'
+      - run: bin/cvb build ${{ inputs.project }}
+      - run: bin/cvb validate ${{ inputs.project }}
+      - run: bin/cvb export ${{ inputs.project }}
+      - name: Publish release artifact
+        run: |
+          tag="${{ inputs.project }}-$(date +%Y%m%d-%H%M)"
+          (cd release/${{ inputs.project }} && zip -q ../../${{ inputs.project }}.zip *.csv)
+          gh release create "$tag" ${{ inputs.project }}.zip --title "$tag" --notes "Delta tables for ${{ inputs.project }}"

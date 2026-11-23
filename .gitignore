@@ -1,0 +1,7 @@
+release/
+.DS_Store
+.Rproj.user
+.Renviron
+errorReportSql.txt
+.env
+.idea/

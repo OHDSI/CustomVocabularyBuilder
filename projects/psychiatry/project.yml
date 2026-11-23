@@ -1,0 +1,6 @@
+project_id: psychiatry
+id_start: 2071500000
+id_end: 2072500000
+legacy_dir: legacy/PSYCHIATRY/Ontology
+vocabulary: {id: PSYCHIATRY, name: "PSYCHIATRY Custom Terminology"}
+sheet: "https://docs.google.com/spreadsheets/d/1hWFDQ620buxGAZPXDPRHXbs-tz5m3zqEGWBgyCEPYtM/export?format=csv&gid=0"
