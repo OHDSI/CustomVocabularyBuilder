@@ -76,8 +76,15 @@ legacy_files <- c(concept_delta = "concept_delta.csv", concept_relationship_delt
 import_legacy <- function(con, id, dir = projects()[[id]]$legacy_dir) {
   p <- projects()[[id]]
   data <- lapply(legacy_files, function(f) read.csv(file.path(dir, f), colClasses = "character", na.strings = "", check.names = FALSE))
+  names(data$concept_class_delta) <- sub("^oncept_class_id$", "concept_class_id", names(data$concept_class_delta))
+  rn <- p$rename
+  data$concept_delta$domain_id <- rename_values(data$concept_delta$domain_id, rn$domain)
+  data$concept_delta$concept_class_id <- rename_values(data$concept_delta$concept_class_id, rn$class)
+  data$domain_delta$domain_id <- rename_values(data$domain_delta$domain_id, rn$domain)
+  data$concept_class_delta$concept_class_id <- rename_values(data$concept_class_delta$concept_class_id, rn$class)
   k <- as.integer(data$vocabulary_delta$vocabulary_concept_id)
   data$vocabulary_delta <- data$vocabulary_delta[k >= p$id_start & k < p$id_end, ]
+  for (t in names(data)) check_lengths(con, t, data[[t]])
   load <- read_sql("sql/load.sql")
   stmts <- lapply(names(data), function(t) {
     if (!nrow(data[[t]])) return(NULL)
@@ -128,31 +135,58 @@ export <- function(con, id, out = file.path("release", id)) {
 
 canon <- c("source_code", "source_code_set", "source_domain", "source_vocabulary_id", "source_concept_class_id",
   "source_concept_id", "source_description", "source_description_synonym", "relationship_id", "predicate_id", "target_concept_id",
+  "target_concept_code", "target_vocabulary_id",
   "confidence", "author_label", "reviewer_label", "mapping_justification", "mapping_tool", "mapping_tool_version")
 alias <- c(source_domain_id = "source_domain", reviewer_name = "reviewer_label", author_name = "author_label",
            source_concept_code = "source_code")
 
 read_mapping <- function(src) {
-  d <- read.csv(src, colClasses = "character", na.strings = character(0), check.names = FALSE, encoding = "UTF-8")
-  n <- tolower(trimws(names(d)))
-  n <- ifelse(n %in% names(alias), alias[n], n)
-  d <- d[, !duplicated(n), drop = FALSE]
-  names(d) <- n[!duplicated(n)]
-  d[setdiff(canon, names(d))] <- NA_character_
-  d[canon]
+  one <- function(f) {
+    d <- read.csv(f, colClasses = "character", na.strings = character(0), check.names = FALSE, encoding = "UTF-8")
+    n <- tolower(trimws(names(d)))
+    n <- ifelse(n %in% names(alias), alias[n], n)
+    d <- d[, !duplicated(n), drop = FALSE]
+    names(d) <- n[!duplicated(n)]
+    d[setdiff(canon, names(d))] <- NA_character_
+    d[canon]
+  }
+  do.call(rbind, lapply(unlist(src), one))
+}
+
+rename_values <- function(x, map) if (is.null(map)) x else ifelse(x %in% names(map), unlist(map)[x], x)
+
+check_lengths <- function(con, tbl, d) {
+  lim <- query(con, sprintf("SELECT column_name, character_maximum_length AS n FROM information_schema.columns
+    WHERE table_schema = '@delta' AND table_name = '%s' AND character_maximum_length IS NOT NULL", tbl))
+  bad <- unlist(lapply(seq_len(nrow(lim)), function(i) {
+    col <- lim$column_name[i]
+    if (!col %in% names(d)) return(NULL)
+    v <- unique(d[[col]][!is.na(d[[col]]) & nchar(d[[col]]) > lim$n[i]])
+    if (length(v)) sprintf("%s.%s (max %s): %s", tbl, col, lim$n[i], paste(sQuote(v, FALSE), collapse = ", "))
+  }))
+  if (length(bad)) stop("values too long for the core column lengths; add a `rename:` entry in project.yml:\n  ", paste(bad, collapse = "\n  "), call. = FALSE)
 }
 
 build <- function(con, id, src = projects()[[id]]$sheet, dry_run = FALSE, max_deprecate = 0.1) {
   p <- projects()[[id]]
   d <- read_mapping(src)
+  d$source_domain <- rename_values(d$source_domain, p$rename$domain)
+  d$source_concept_class_id <- rename_values(d$source_concept_class_id, p$rename$class)
   out <- file.path("release", id)
   dir.create(out, recursive = TRUE, showWarnings = FALSE)
   utils::write.csv(d, file.path(out, "mapping_source.csv"), row.names = FALSE, na = "")
   d$ord <- seq_len(nrow(d))
+  check_lengths(con, "concept_delta", data.frame(domain_id = d$source_domain, concept_class_id = d$source_concept_class_id,
+                                                  vocabulary_id = d$source_vocabulary_id))
   refresh_views(con, id)
-  cfg <- c(vocabulary = p$vocabulary$id, vocabulary_name = p$vocabulary$name,
-           provider = if (is.null(p$sheet)) src else sub("/export.*", "", p$sheet), max_deprecate = max_deprecate,
+  vocabs <- if (is.null(p$vocabularies)) list(p$vocabulary) else p$vocabularies
+  cfg <- c(vocabulary = vocabs[[1]]$id, provider = sub("/export.*", "", unlist(src)[1]), max_deprecate = max_deprecate,
            force_vocabulary = isTRUE(p$force_vocabulary))
+  temp_table(con, "vocabs", data.frame(ord = seq_along(vocabs), id = vapply(vocabs, `[[`, "", "id"), name = vapply(vocabs, `[[`, "", "name")))
+  rd <- if (is.null(p$relationships)) NULL else read.csv(p$relationships, colClasses = "character", na.strings = character(0), check.names = FALSE)
+  if (is.null(rd)) executeSql(con, "DROP TABLE IF EXISTS rel_defs; CREATE TEMP TABLE rel_defs (relationship_id text, relationship_name text,
+    is_hierarchical text, defines_ancestry text, reverse_relationship_id text)", progressBar = FALSE, reportOverallTime = FALSE)
+  else temp_table(con, "rel_defs", rd[c("relationship_id", "relationship_name", "is_hierarchical", "defines_ancestry", "reverse_relationship_id")])
   temp_table(con, "cfg", data.frame(ckey = names(cfg), value = as.character(cfg)))
   cl <- if (is.null(p$classes)) c(none = "") else unlist(p$classes)
   temp_table(con, "class_map", data.frame(code_set = names(cl), class_id = unname(cl)))

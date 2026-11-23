@@ -6,7 +6,7 @@ on:
         description: Project id (folder under projects/)
         required: true
         type: choice
-        options: [mimic4, psychiatry]
+        options: [mimic4, psychiatry, gis]
       apply:
         description: Apply the reviewed changes to the database and publish a release
         type: boolean

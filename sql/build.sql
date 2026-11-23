@@ -1,4 +1,4 @@
-DROP TABLE IF EXISTS pg_temp.src, pg_temp.tgt, pg_temp.src_ok, pg_temp.src_reject, pg_temp.cn, pg_temp.ex, pg_temp.keys, pg_temp.want_s2c, pg_temp.want_rel, pg_temp.want_anc, pg_temp.want_syn, pg_temp.pc, pg_temp.custom, pg_temp.up, pg_temp.up_core, pg_temp.core_anc, pg_temp.summary, pg_temp.abort, pg_temp.id_base, pg_temp.old_concept, pg_temp.old_rel;
+DROP TABLE IF EXISTS pg_temp.new_vocab, pg_temp.new_rel, pg_temp.src, pg_temp.tgt, pg_temp.src_ok, pg_temp.src_reject, pg_temp.cn, pg_temp.ex, pg_temp.keys, pg_temp.want_s2c, pg_temp.want_rel, pg_temp.want_anc, pg_temp.want_syn, pg_temp.pc, pg_temp.custom, pg_temp.up, pg_temp.up_core, pg_temp.core_anc, pg_temp.summary, pg_temp.abort, pg_temp.id_base, pg_temp.old_concept, pg_temp.old_rel;
 CREATE TEMP TABLE summary (step text, n bigint);
 CREATE TEMP TABLE abort (reason text);
 CREATE TEMP TABLE old_concept AS SELECT concept_id, concept_code, concept_name, domain_id, concept_class_id, invalid_reason
@@ -8,18 +8,35 @@ CREATE TEMP TABLE old_rel AS SELECT concept_id_1, concept_id_2, relationship_id
 
 -- vocabulary bootstrap
 CREATE TEMP TABLE new_vocab AS
-SELECT r.id_end - 1 AS concept_id FROM @delta.project r
-WHERE r.project_id = @project AND NOT EXISTS (SELECT 1 FROM @delta.vocabulary_delta
-  WHERE project_id = @project AND vocabulary_id = (SELECT value FROM cfg WHERE ckey = 'vocabulary'));
+SELECT r.id_end - v.ord AS concept_id, v.id, v.name FROM @delta.project r, vocabs v
+WHERE r.project_id = @project AND NOT EXISTS (SELECT 1 FROM @delta.vocabulary_delta d
+  WHERE d.project_id = @project AND d.vocabulary_id = v.id);
 INSERT INTO @delta.concept_delta
-SELECT @project, concept_id, (SELECT value FROM cfg WHERE ckey = 'vocabulary_name'), 'Metadata', 'Vocabulary', 'Vocabulary', 'S',
-       'OMOP generated', current_date, '2099-12-31', NULL FROM new_vocab;
+SELECT @project, concept_id, name, 'Metadata', 'Vocabulary', 'Vocabulary', 'S', 'OMOP generated', current_date, '2099-12-31', NULL FROM new_vocab;
 INSERT INTO @delta.vocabulary_delta
-SELECT @project, (SELECT value FROM cfg WHERE ckey = 'vocabulary'), (SELECT value FROM cfg WHERE ckey = 'vocabulary_name'), 'OMOP generated',
-       current_date::text, concept_id FROM new_vocab;
+SELECT @project, id, name, 'OMOP generated', current_date::text, concept_id FROM new_vocab;
 DROP TABLE new_vocab;
 
+-- custom relationship definitions (a reverse is generated when the sheet does not define it)
+CREATE TEMP TABLE new_rel AS
+WITH d AS (
+  SELECT trim(relationship_id) AS rid, trim(relationship_name) AS rname, trim(is_hierarchical) AS ih, trim(defines_ancestry) AS da,
+         trim(reverse_relationship_id) AS rev, 0 AS pri FROM rel_defs
+  UNION ALL SELECT trim(reverse_relationship_id), trim(reverse_relationship_id), trim(is_hierarchical), trim(defines_ancestry),
+         trim(relationship_id), 1 FROM rel_defs),
+u AS (SELECT DISTINCT ON (rid) * FROM d WHERE rid <> '' ORDER BY rid, pri)
+SELECT coalesce((SELECT max(relationship_concept_id) FROM @delta.relationship_delta WHERE project_id = @project), r.id_start - 1)
+       + row_number() OVER (ORDER BY u.rid) AS concept_id, u.*
+FROM @delta.project r, u
+WHERE r.project_id = @project AND NOT EXISTS (SELECT 1 FROM @views.relationship x WHERE x.relationship_id = u.rid);
+INSERT INTO @delta.concept_delta
+SELECT @project, concept_id, rname, 'Metadata', 'OMOP Extension', 'Relationship', 'S', rid, current_date, '2099-12-31', NULL FROM new_rel;
+INSERT INTO @delta.relationship_delta SELECT @project, rid, rname, ih, da, rev, concept_id FROM new_rel;
+INSERT INTO summary SELECT 'relationships defined', count(*) FROM new_rel HAVING count(*) > 0;
+DROP TABLE new_rel;
+
 -- staged source rows
+CREATE OR REPLACE FUNCTION pg_temp.btrim_ws(t text) RETURNS text LANGUAGE sql IMMUTABLE AS 'SELECT regexp_replace(t, ''^\s+|\s+$'', '''', ''g'')';
 ANALYZE src_raw;
 CREATE TEMP TABLE tgt AS
 SELECT concept_id, domain_id, concept_code, vocabulary_id FROM @views.concept
@@ -28,9 +45,9 @@ ANALYZE tgt;
 CREATE TEMP TABLE src AS
 WITH raw AS (
   SELECT ord,
-    CASE WHEN length(trim(source_code)) <= 50 THEN nullif(trim(source_code), '')
-         ELSE left(trim(source_code), 39) || '_' || substr(md5(upper(trim(source_code))), 1, 10) END AS code,
-    length(trim(source_code)) > 50 AS shortened,
+    CASE WHEN length(pg_temp.btrim_ws(source_code)) <= 50 THEN nullif(pg_temp.btrim_ws(source_code), '')
+         ELSE left(pg_temp.btrim_ws(source_code), 39) || '_' || substr(md5(upper(pg_temp.btrim_ws(source_code))), 1, 10) END AS code,
+    length(pg_temp.btrim_ws(source_code)) > 50 AS shortened,
     CASE WHEN trim(source_concept_id) ~ '^[1-9][0-9]*$' THEN trim(source_concept_id)::integer END AS sheet_id,
     CASE WHEN (SELECT value FROM cfg WHERE ckey = 'force_vocabulary') = 'TRUE'
          THEN (SELECT value FROM cfg WHERE ckey = 'vocabulary')
@@ -43,14 +60,16 @@ WITH raw AS (
     nullif(trim(relationship_id), '') AS rel,
     lower(nullif(trim(predicate_id), '')) AS predicate,
     CASE WHEN trim(target_concept_id) ~ '^[1-9][0-9]*$' THEN trim(target_concept_id)::integer END AS target_id,
+    CASE WHEN NOT coalesce(trim(target_concept_id) ~ '^[1-9][0-9]*$', false) THEN nullif(pg_temp.btrim_ws(target_concept_code), '') END AS tcode,
+    nullif(trim(target_vocabulary_id), '') AS tvocab_in,
     CASE WHEN trim(confidence) ~ '^[0-9.]+$' THEN trim(confidence)::float END AS confidence,
     nullif(trim(author_label), '') AS author, nullif(trim(reviewer_label), '') AS reviewer,
     nullif(trim(mapping_justification), '') AS justification,
     nullif(trim(mapping_tool), '') AS tool, nullif(trim(mapping_tool_version), '') AS tool_version
   FROM src_raw)
-SELECT raw.*, upper(code) AS ckey, t.domain_id AS target_domain, t.concept_code AS target_code,
+SELECT raw.*, coalesce(raw.tvocab_in, raw.vocabulary_id) AS tvocab, upper(code) AS ckey, t.domain_id AS target_domain, t.concept_code AS target_code,
   t.vocabulary_id AS target_vocabulary,
-  CASE WHEN target_id IS NULL THEN NULL ELSE coalesce(rel, CASE predicate
+  CASE WHEN target_id IS NULL AND tcode IS NULL THEN NULL ELSE coalesce(rel, CASE predicate
     WHEN 'skos:exactmatch' THEN 'Maps to' WHEN 'skos:closematch' THEN 'Maps to'
     WHEN 'skos:broadmatch' THEN 'Is a' WHEN 'skos:narrowmatch' THEN 'Subsumes'
     WHEN 'skos:relatedmatch' THEN CASE t.domain_id WHEN 'Procedure' THEN 'Has asso proc'
@@ -64,8 +83,8 @@ SELECT ord, code, CASE
     WHEN code IS NULL THEN 'blank code'
     WHEN name IS NULL THEN 'blank description'
     WHEN target_id IS NOT NULL AND NOT target_found THEN 'target concept not found'
-    WHEN target_id IS NOT NULL AND rel_eff IS NULL THEN 'no relationship_id and no usable predicate'
-    WHEN target_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM @views.relationship r WHERE r.relationship_id = src.rel_eff)
+    WHEN (target_id IS NOT NULL OR tcode IS NOT NULL) AND rel_eff IS NULL THEN 'no relationship_id and no usable predicate'
+    WHEN (target_id IS NOT NULL OR tcode IS NOT NULL) AND NOT EXISTS (SELECT 1 FROM @views.relationship r WHERE r.relationship_id = src.rel_eff)
       THEN 'unknown relationship_id' END AS reason
 FROM src;
 DELETE FROM src_reject WHERE reason IS NULL;
@@ -73,8 +92,8 @@ INSERT INTO summary SELECT 'rejected: ' || reason, count(*) FROM src_reject GROU
 INSERT INTO summary SELECT 'warning: codes over 50 characters shortened with hash suffix', count(*) FROM src WHERE shortened;
 
 CREATE TEMP TABLE src_ok AS
-SELECT DISTINCT ON (vocabulary_id, ckey, rel_eff, target_id) * FROM src
-WHERE ord NOT IN (SELECT ord FROM src_reject) ORDER BY vocabulary_id, ckey, rel_eff, target_id, ord;
+SELECT DISTINCT ON (vocabulary_id, ckey, rel_eff, target_id, tcode, tvocab) * FROM src
+WHERE ord NOT IN (SELECT ord FROM src_reject) ORDER BY vocabulary_id, ckey, rel_eff, target_id, tcode, tvocab, ord;
 
 ANALYZE src_ok;
 
@@ -96,6 +115,8 @@ FROM src_ok s
 LEFT JOIN ex e ON e.vocabulary_id = s.vocabulary_id AND e.ckey = s.ckey
 WINDOW w AS (PARTITION BY s.vocabulary_id, s.ckey ORDER BY (s.target_domain IS NULL), s.ord)
 ORDER BY s.vocabulary_id, s.ckey, s.ord;
+INSERT INTO summary SELECT 'rejected: concept without domain', count(*) FROM cn WHERE domain_id IS NULL HAVING count(*) > 0;
+DELETE FROM cn WHERE domain_id IS NULL;
 
 UPDATE cn SET concept_id = d.concept_id, old_flag = d.standard_concept FROM @delta.concept_delta d
 WHERE d.project_id = @project AND d.concept_id = cn.sheet_id AND d.vocabulary_id = cn.vocabulary_id;
@@ -136,14 +157,20 @@ INSERT INTO summary SELECT 'concepts deprecated', count(*) FROM x;
 
 -- relationships
 CREATE TEMP TABLE want_rel AS
-WITH e AS (SELECT cn.concept_id AS c, s.target_id AS t, s.rel_eff AS rel FROM src_ok s
-  JOIN cn USING (vocabulary_id, ckey) WHERE s.rel_eff IS NOT NULL)
+WITH e AS (SELECT cn.concept_id AS c, coalesce(s.target_id, tc.concept_id) AS t, s.rel_eff AS rel FROM src_ok s
+  JOIN cn USING (vocabulary_id, ckey)
+  LEFT JOIN cn tc ON s.tcode IS NOT NULL AND tc.vocabulary_id = s.tvocab AND tc.ckey = upper(s.tcode)
+  WHERE s.rel_eff IS NOT NULL AND coalesce(s.target_id, tc.concept_id) IS NOT NULL)
 SELECT c AS id1, t AS id2, rel AS rid FROM e
 UNION SELECT e.t, e.c, r.reverse_relationship_id FROM e JOIN @views.relationship r ON r.relationship_id = e.rel
 UNION SELECT concept_id, concept_id, 'Maps to' FROM cn WHERE std
 UNION SELECT concept_id, concept_id, 'Mapped from' FROM cn WHERE std;
 
 ANALYZE want_rel;
+INSERT INTO summary SELECT 'rejected: target code not found', count(*) FROM src_ok s
+WHERE s.tcode IS NOT NULL AND s.rel_eff IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM cn tc WHERE tc.vocabulary_id = s.tvocab AND tc.ckey = upper(s.tcode))
+HAVING count(*) > 0;
 WITH x AS (INSERT INTO @delta.concept_relationship_delta
   SELECT @project, id1, id2, rid, current_date, '2099-12-31', NULL FROM want_rel w
   WHERE NOT EXISTS (SELECT 1 FROM @delta.concept_relationship_delta r
@@ -177,21 +204,24 @@ WITH x AS (INSERT INTO @delta.source_to_concept_map_delta
   SELECT @project, source_code, source_concept_id, source_vocabulary_id, descr, target_concept_id, target_vocabulary_id,
          current_date, '2099-12-31', NULL FROM want_s2c w
   WHERE NOT EXISTS (SELECT 1 FROM @delta.source_to_concept_map_delta m WHERE m.project_id = @project
-    AND m.source_concept_id = w.source_concept_id AND m.target_concept_id = w.target_concept_id AND m.invalid_reason IS NULL)
-  RETURNING 1)
+    AND m.source_vocabulary_id = w.source_vocabulary_id AND m.source_code = w.source_code
+    AND m.target_concept_id = w.target_concept_id AND m.invalid_reason IS NULL)
+  ON CONFLICT DO NOTHING RETURNING 1)
 INSERT INTO summary SELECT 'source_to_concept_map inserted', count(*) FROM x;
 
 WITH x AS (UPDATE @delta.source_to_concept_map_delta m SET invalid_reason = 'D', valid_end_date = greatest(valid_start_date, current_date - 1)
   WHERE m.project_id = @project AND m.invalid_reason IS NULL
-    AND NOT EXISTS (SELECT 1 FROM want_s2c w WHERE w.source_concept_id = m.source_concept_id
+    AND NOT EXISTS (SELECT 1 FROM want_s2c w WHERE w.source_vocabulary_id = m.source_vocabulary_id AND w.source_code = m.source_code
       AND w.target_concept_id = m.target_concept_id) RETURNING 1)
 INSERT INTO summary SELECT 'source_to_concept_map deprecated', count(*) FROM x;
 
 -- synonyms
 CREATE TEMP TABLE want_syn AS
-SELECT DISTINCT cn.concept_id, trim(x) AS synonym FROM src_ok s JOIN cn USING (vocabulary_id, ckey),
+SELECT DISTINCT cn.concept_id, left(trim(x), 1000) AS synonym FROM src_ok s JOIN cn USING (vocabulary_id, ckey),
   LATERAL regexp_split_to_table(s.synonym, '\s*\|\|\s*') AS x
 WHERE s.synonym IS NOT NULL AND trim(x) NOT IN ('', '?');
+INSERT INTO summary SELECT 'warning: synonyms truncated to 1000 characters', count(*) FROM src_ok s,
+  LATERAL regexp_split_to_table(s.synonym, '\s*\|\|\s*') AS x WHERE length(trim(x)) > 1000 HAVING count(*) > 0;
 WITH x AS (INSERT INTO @delta.concept_synonym_delta SELECT @project, concept_id, synonym, 4180186 FROM want_syn
   ON CONFLICT DO NOTHING RETURNING 1)
 INSERT INTO summary SELECT 'synonyms inserted', count(*) FROM x;
@@ -251,7 +281,7 @@ WITH m AS (SELECT s.author, s.reviewer, s.confidence, s.predicate, s.justificati
 INSERT INTO summary SELECT 'mapping_metadata inserted', count(*) FROM x;
 
 UPDATE @delta.vocabulary_delta SET vocabulary_version = current_date::text
-WHERE project_id = @project AND vocabulary_id = (SELECT value FROM cfg WHERE ckey = 'vocabulary');
+WHERE project_id = @project AND vocabulary_id IN (SELECT id FROM vocabs);
 
 -- guard against a bad or empty source wiping out the delta
 INSERT INTO abort
