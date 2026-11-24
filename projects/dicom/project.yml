@@ -1,0 +1,6 @@
+project_id: dicom
+id_start: 2128000000
+id_end: 2128100000
+legacy_dir: legacy/DICOM/Ontology
+vocabulary: {id: DICOM, name: "Digital Imaging and Communications in Medicine (National Electrical Manufacturers Association)"}
+force_vocabulary: true

@@ -12,6 +12,7 @@ Projects reserve a block in the two-billion concept_id space (max 2.147b). A blo
 | MIMIC4     | 2.06150           | 2.06350         | [sheet](https://docs.google.com/spreadsheets/d/1LgNSwxx7uDjc6hAJb4m6o_6WvVmuBgH5QYzAqeS3aD0/edit?gid=1932813645) |
 | PSYCHIATRY | 2.07150           | 2.07250         | [sheet](https://docs.google.com/spreadsheets/d/1hWFDQ620buxGAZPXDPRHXbs-tz5m3zqEGWBgyCEPYtM/export?format=csv&gid=0) |
 | WAVEFORM   | 2.08150           | 2.08250         | to be confirmed |
+| DICOM      | 2.12800           | 2.12810         | none yet; loaded with `import-legacy` from `legacy/DICOM/Ontology` |
 
 ## Requirements
 R with `DatabaseConnector`, `SqlRender` and `yaml`, and a JDK (needed by `rJava`). The PostgreSQL JDBC driver is downloaded on first use into `~/.cvb/jdbc` (override with `DATABASECONNECTOR_JAR_FOLDER`). The delta schema defaults to the core schema; set `CVB_SCHEMA` to change it (it may equal `CVB_CORE`; no schemas are created, so it must already exist) (and `CVB_CORE` for the core vocabulary schema). Set `PGSSLMODE=require` for a remote host that needs TLS.
