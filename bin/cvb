@@ -10,6 +10,6 @@ switch(a[1],
     build(con, a[2], src, dry_run = "--dry-run" %in% a)
   },
   views = refresh_views(con, a[2]),
-  validate = { r <- validate(con, a[2]); if (any(r$severity == "error" & r$violations > 0)) quit(status = 1) },
+  validate = if (length(failed_checks(validate(con, a[2])))) quit(status = 1),
   export = export(con, a[2]),
   stop("usage: cvb init | import-legacy <project> [dir] | build <project> [--dry-run] [--file csv] | views <project> | validate <project> | export <project>"))
