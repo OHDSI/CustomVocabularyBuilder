@@ -28,7 +28,7 @@ bin/cvb export <project>                 # writes release/<project>/*.csv
 ```
 
 ## GitHub Action (review, then apply)
-`.github/workflows/build.yml` runs from **Actions > Build vocabulary > Run workflow**. With `apply` unchecked it only does a dry run (nothing is written) and uploads `review-<project>`: CSVs of new, changed and deprecated concepts and added and removed relationships. After the review, run it again with `apply` checked. That job waits for approval on the `apply` environment, then builds, validates, exports and publishes a release.
+`.github/workflows/build.yml` runs from **Actions > Build vocabulary > Run workflow**. With `apply` unchecked it only does a dry run (nothing is written) and uploads `review-<project>`: CSVs of new, changed and deprecated concepts, added and removed relationships, and the validation results (`validation.csv`, plus the offending rows of each failed check under `validation/`). After the review, run it again with `apply` checked. That job waits for approval on the `apply` environment, then builds (which validates before committing), exports and publishes a release.
 
 One-time setup in the GitHub repo (Settings > Secrets and variables > Actions):
 - **Secrets:** `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`, `CVB_CORE` (the schema that holds the core vocabulary tables). Optional: `CVB_SCHEMA` (defaults to `CVB_CORE`) and `PGSSLMODE` (e.g. `require`).
@@ -42,6 +42,7 @@ One-time setup in the GitHub repo (Settings > Secrets and variables > Actions):
 - A concept is non-standard when any of its rows is a `Maps to`/`Maps to value`, otherwise standard (with self `Maps to`/`Mapped from`). The flag is set once, when the concept is created.
 - Re-running is idempotent. Concepts and relationships that disappear from the sheet are deprecated, never deleted; a build that would deprecate more than 10% aborts.
 - Ancestors are the closure of custom `Is a` edges through the core `concept_ancestor`.
+- The validation suite runs inside the build transaction. An error-level failure rolls the build back; a dry run reports it and finishes.
 - `source_to_concept_map`, synonyms (split on `||`) and `mapping_metadata` are derived from the same rows.
 
 `sql/checks/` holds the validation suite; each file states its severity on the first line.

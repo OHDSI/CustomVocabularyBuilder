@@ -105,23 +105,37 @@ refresh_views <- function(con, id) {
 
 validate <- function(con, id) {
   refresh_views(con, id)
+  run_checks(con, id)
+}
+
+# Uses jq so the checks can run inside an open transaction; `out` saves the violating rows of each failed check.
+run_checks <- function(con, id, out = NULL) {
+  if (!is.null(out)) unlink(file.path(out, c("validation", "validation.csv")), recursive = TRUE)
   res <- lapply(sort(Sys.glob("sql/checks/*.sql")), function(f) {
     sql <- read_sql(f)
-    d <- query(con, sql, id)
+    d <- jq(con, render(sql, id))
     list(row = data.frame(check = sub("\\.sql$", "", basename(f)),
                           severity = sub("^-- (\\w+):.*", "\\1", sql),
                           violations = nrow(d),
                           description = sub("^-- \\w+: ([^\n]*).*", "\\1", sql)),
          rows = d)
   })
-  out <- do.call(rbind, lapply(res, `[[`, "row"))
+  res_summary <- do.call(rbind, lapply(res, `[[`, "row"))
   for (r in res) if (nrow(r$rows) > 0) {
     cat("\n", r$row$check, " (", r$row$severity, "): ", r$row$description, "\n", sep = "")
     print(utils::head(r$rows, 5), row.names = FALSE)
   }
-  cat("\n"); print(out[, c("check", "severity", "violations")], row.names = FALSE)
-  out
+  cat("\n"); print(res_summary[, c("check", "severity", "violations")], row.names = FALSE)
+  if (!is.null(out)) {
+    utils::write.csv(res_summary, file.path(out, "validation.csv"), row.names = FALSE)
+    dir.create(file.path(out, "validation"), showWarnings = FALSE)
+    for (r in res) if (nrow(r$rows) > 0)
+      utils::write.csv(r$rows, file.path(out, "validation", paste0(r$row$check, ".csv")), row.names = FALSE, na = "")
+  }
+  res_summary
 }
+
+failed_checks <- function(res) res$check[res$severity == "error" & res$violations > 0]
 
 export <- function(con, id, out = file.path("release", id)) {
   dir.create(out, recursive = TRUE, showWarnings = FALSE)
@@ -201,6 +215,11 @@ build <- function(con, id, src = projects()[[id]]$sheet, dry_run = FALSE, max_de
     rv <- file.path(out, "review"); dir.create(rv, showWarnings = FALSE)
     for (f in sort(Sys.glob("sql/review/*.sql")))
       utils::write.csv(jq(con, render(read_sql(f), id)), file.path(rv, sub("sql$", "csv", basename(f))), row.names = FALSE, na = "")
+    failed <- failed_checks(run_checks(con, id, rv))
+    if (length(failed)) {
+      msg <- paste("validation failed:", paste(failed, collapse = ", "))
+      if (dry_run) warning("would abort: ", msg, call. = FALSE) else stop(msg, call. = FALSE)
+    }
     if (dry_run) message("dry run: rolling back")
   }, commit = !dry_run)
 }
